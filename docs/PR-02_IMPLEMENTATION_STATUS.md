@@ -43,3 +43,20 @@ Verified supplier costs/finishes/production SLA; Shopify test/live eligibility, 
 4. Validate financial payouts, shipping costs, refunds, manual exceptions and three size SKUs before production enablement.
 
 No changes were made to unrelated projects or to live payment settings.
+
+## Approved Batch 1 engineering expansion — 2026-10-27
+- The initial foundation/test/migration checks have passed in GitHub Actions.
+- `db/migrations/003_immutable_prices.sql` defines immutable, approved historical campaign prices. The order adapter selects only pricing effective and verified as of the Shopify order time.
+- `src/postgres-store.js` implements the order ingestion transaction contract with advisory locks, scoped campaign/proof/variant reads, sale-time price snapshots, inbox processing, append-only beneficiary earnings and rollback on failure.
+- `src/admin-order.js` reads Shopify Admin GraphQL orders and subtracts **all discount allocations**, preventing under-detection of order-level discounts. It rejects truncated line pages and non-USD / imprecise money.
+- `src/storefront.js` resolves all publishable campaign/proof/variant values server-side before creating a guest cart. Never trust cart client-supplied prices or variants.
+- `src/style-previews.js` generates twelve numbered 12x18 SVG concept thumbnails using actual organization text, HEX colors and preserved aspect-ratio official raster logos. These are NOT finished 110gsm vendor print files or photorealistic final mockups.
+- `db/test/acceptance.sql` checks database role uniqueness, contribution margin floor, immutable prices, six-size gating and sample order/earnings snapshot on disposable PostgreSQL.
+- Connected Vercel project `missionflag` was inspected: no environment variables are configured. No Shopify Admin/Storefront credentials or staging database binding are established there. No real Shopify test sale, media upload, production fulfillment or deployed secure organizer portal has been proven.
+- The published checkout cutoff **cannot be guaranteed** solely by pre-creating a Shopify cart. Hosted checkout may finish after a campaign expires; settlement must reconcile captured paid time and define a safe expired-cart rule before live launch.
+
+### Release state
+The code is usable for CI-verified domain and integration-adapter development but has **not** completed Batch 1 acceptance. PR-02 remains draft. Do not merge or turn on real-money transactions solely because mock/SQL tests pass.
+
+### Next cohesive work
+Secure identity and scoped database access; true uploaded-logo storage/proof approval; public fundraiser onboarding and campaign storefront UI; an authenticated HTTP runtime; connected Shopify test store and staged database. Then run the full end-to-end pilot including shipping and refund reversal.
