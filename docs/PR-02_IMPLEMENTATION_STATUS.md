@@ -27,3 +27,19 @@
 
 ## Required external validation before real purchases
 Verified supplier costs/finishes/production SLA; Shopify test/live eligibility, store credentials and variant IDs; payout terms; logo authorization; payment and shipping configuration; shipping handoff. No live payment or deployment mutations were made.
+
+## Progress addendum — approved kickoff (2026-10-27)
+- PR-01 has been merged onto `main`. PR-02 now targets `main`.
+- Vercel project `missionflag` is present, but project metadata shows `live: false`; a READY preview/build status alone does not establish a working application or real checkout.
+- `src/shopify.js`: server-side guest cart builder using Shopify Storefront API `cartCreate`, approved proof/campaign checks, signed line attribution, and raw-byte Shopify webhook HMAC validation. Requires actual Shopify credentials, trusted persistent mappings and an HTTP runtime before it can handle real orders.
+- `src/intake.js`: optional reach metrics and household-based projections that do not invent conversion results or collect student rosters.
+- `db/migrations/001_initial.sql`: relational schema for dealers, organizations, scoped memberships, verified sizes, campaigns, artwork revisions, adult share tokens, durable webhook inbox, sale-time snapshot lines, append-only group/dealer earnings deltas, payout records, fulfillment and audit events. The schema is not applied to any production database.
+- CI now has Node unit tests and disposable PostgreSQL migration smoke validation. Passing CI is not a hosted Shopify end-to-end test.
+
+### Next implementation work (not yet claimed complete)
+1. Connect approved app-auth/identity provider with enforced route-level and tenant-level isolation; implement form endpoints, object storage and real thumbnail/proof generation.
+2. Wire a real transactional database/service and Shopify Admin-order reconciliation with authentic signed delivery IDs; do not credit earnings purely from customer-editable attributes.
+3. Build campaign/organizer/HQ UI and launch one approved pilot through a verified Shopify test shop and supplier export.
+4. Validate financial payouts, shipping costs, refunds, manual exceptions and three size SKUs before production enablement.
+
+No changes were made to unrelated projects or to live payment settings.
