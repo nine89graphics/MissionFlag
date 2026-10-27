@@ -33,6 +33,13 @@ CREATE TABLE memberships (
   )
 );
 CREATE INDEX idx_memberships_subject ON memberships(auth_subject);
+-- PostgreSQL NULLs are distinct: separate scope-specific uniqueness is required.
+CREATE UNIQUE INDEX ux_membership_hq ON memberships(auth_subject)
+  WHERE role='hq';
+CREATE UNIQUE INDEX ux_membership_dealer ON memberships(auth_subject,dealer_id)
+  WHERE role='dealer';
+CREATE UNIQUE INDEX ux_membership_organizer ON memberships(auth_subject,organization_id)
+  WHERE role='organizer';
 
 CREATE TABLE catalog_sizes (
   sku text PRIMARY KEY,
