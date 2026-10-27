@@ -45,3 +45,4 @@ jobs:
           test "$(psql -h localhost -U postgres -d missionflag_test -Atc 'select count(*) from catalog_sizes')" = "6"
           test "$(psql -h localhost -U postgres -d missionflag_test -Atc 'select count(*) from catalog_sizes where enabled')" = "0"
           psql -h localhost -U postgres -d missionflag_test -v ON_ERROR_STOP=1 -c 'SELECT * FROM refund_line_adjustments LIMIT 0'
+          psql -h localhost -U postgres -d missionflag_test -v ON_ERROR_STOP=1 -f db/test/acceptance.sql
