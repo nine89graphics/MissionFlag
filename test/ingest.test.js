@@ -27,6 +27,7 @@ function fixture(){
      getCampaignVariant:async()=>({enabled:true,shopifyVariantId:'gid://shopify/ProductVariant/123'}),
      getPriceSnapshot:async()=>({verified:true,unitPriceCents:2500,
        manufacturingCents:700,groupEarningsCents:500,dealerEarningsCents:100}),
+     recordDelivery:async()=>{},
      insertOrderLine:async line=>state.lines.add(line.shopifyLineId),
      appendEarnings:async entry=>state.earnings.push(entry),
      markDelivery:async d=>state.deliveries.add(d.deliveryId)
