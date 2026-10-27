@@ -27,8 +27,11 @@ export function createPostgresOrderStore(pool) {
         const tx={
           async hasDelivery(id) {
             await lock('delivery:'+id);
-            return checkedResult(await query(
-              'SELECT 1 FROM shopify_webhook_inbox WHERE delivery_id=$1',[id])).length>0;
+            const rows=checkedResult(await query(
+              'SELECT processed_at FROM shopify_webhook_inbox WHERE delivery_id=$1',[id]));
+            if(rows[0]&&!rows[0].processed_at)
+              throw new Error('Unprocessed delivery requires reconciliation');
+            return rows.length>0;
           },
           async recordDelivery({deliveryId,shopDomain,topic,payload}) {
             await query(
@@ -57,7 +60,7 @@ export function createPostgresOrderStore(pool) {
           },
           async getPriceSnapshot(campaignId,sizeId,asOf) {
             const rows=checkedResult(await query(
-              'SELECT * FROM campaign_price_versions WHERE campaign_id=$1 AND size_sku=$2 AND effective_from<=$3::timestamptz ORDER BY effective_from DESC LIMIT 1',
+              'SELECT * FROM campaign_price_versions WHERE campaign_id=$1 AND size_sku=$2 AND effective_from<=$3::timestamptz AND verified_at<=$3::timestamptz ORDER BY effective_from DESC LIMIT 1',
               [campaignId,sizeId,asOf]));
             const row=rows[0];if(!row)return null;
             const keys=['unit_price_cents','manufacturing_cents','packing_cents',
