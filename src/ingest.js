@@ -12,11 +12,18 @@ export async function ingestPaidOrder({
     return {status:401,reason:'Invalid webhook HMAC'};
   if(!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shopDomain||'')||
      !deliveryId||topic!=='orders/paid') return {status:400,reason:'Unsupported delivery'};
-  const body=JSON.parse(Buffer.isBuffer(rawBody)?rawBody.toString('utf8'):rawBody);
-  if(!body?.admin_graphql_api_id) return {status:400,reason:'Missing Shopify order id'};
+  let body;
+  try { body=JSON.parse(Buffer.isBuffer(rawBody)?rawBody.toString('utf8'):rawBody); }
+  catch { return {status:400,reason:'Malformed Shopify webhook body'}; }
+  if(!/^gid:\/\/shopify\/Order\/\d+$/.test(body?.admin_graphql_api_id||''))
+    return {status:400,reason:'Missing Shopify order id'};
   // A store must implement runTransaction with unique inbox and line constraints.
   return store.runTransaction(async tx=>{
     if(await tx.hasDelivery(deliveryId)) return {status:200,duplicate:true};
+    // Commit the delivery row in the same transaction as the earnings entries.
+    // Store a minimal sanitized payload; avoid duplicating buyer PII in our DB.
+    await tx.recordDelivery({deliveryId,topic,shopDomain,
+      payload:{orderGid:body.admin_graphql_api_id}});
     const order=await fetchShopifyOrder(body.admin_graphql_api_id,shopDomain);
     if(!order||order.id!==body.admin_graphql_api_id||
       !['PAID','PARTIALLY_REFUNDED'].includes(order.displayFinancialStatus))
@@ -25,7 +32,13 @@ export async function ingestPaidOrder({
     for(const line of order.lineItems) {
       const attribution=verifyLineAttribution(line.customAttributes,attributionSecret,
         {orderCreatedAt:order.createdAt});
-      if(!attribution) continue;
+      if(!attribution) {
+        // Ordinary Shopify merchandise may share the store; ignore those.
+        // But a tampered fundraiser attribution is an exception, not a silent sale.
+        if(line.customAttributes?.some(a=>String(a.key||a.name).startsWith('_mf_')))
+          throw new Error('Unverifiable Mission Flag attribution');
+        continue;
+      }
       if(line.id===undefined||line.variantId!==attribution.variantId||
         line.quantity!==attribution.quantity) throw new Error('Shopify line attribution mismatch');
       const campaign=await tx.getCampaign(attribution.campaignId);
@@ -50,7 +63,7 @@ export async function ingestPaidOrder({
         shopifyOrderId:order.id,shopifyLineId:line.id,
         campaignId:campaign.id,proofId:proof.id,
         participantToken:attribution.participantToken,sizeId:attribution.sizeId,
-        paidAt:order.createdAt,...snapshot
+        paidAt:order.createdAt,priceVersionId:price.priceVersionId||null,...snapshot
       });
       await tx.appendEarnings({deliveryId,lineId:line.id,campaignId:campaign.id,
         dealerId:campaign.dealerId??null,groupCents:snapshot.groupLiabilityCents,
