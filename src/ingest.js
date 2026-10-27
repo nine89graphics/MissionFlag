@@ -1,0 +1,76 @@
+// Durable order ingestion service. The injected store MUST implement these calls
+// in one atomic database transaction with a UNIQUE delivery id and order line id.
+// Shopify Admin order fetch is server-side, authenticated and authoritative.
+import {verifyShopifyWebhook,verifyLineAttribution} from './shopify.js';
+import {fundraiserLine} from './core.js';
+
+export async function ingestPaidOrder({
+  rawBody,hmacHeader,webhookSecret,shopDomain,deliveryId,topic,
+  store,fetchShopifyOrder,attributionSecret,now=new Date()
+}) {
+  if (!verifyShopifyWebhook({rawBody,hmacHeader,secret:webhookSecret}))
+    return {status:401,reason:'Invalid webhook HMAC'};
+  if(!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shopDomain||'')||
+     !deliveryId||topic!=='orders/paid') return {status:400,reason:'Unsupported delivery'};
+  let body;
+  try { body=JSON.parse(Buffer.isBuffer(rawBody)?rawBody.toString('utf8'):rawBody); }
+  catch { return {status:400,reason:'Malformed Shopify webhook body'}; }
+  if(!/^gid:\/\/shopify\/Order\/\d+$/.test(body?.admin_graphql_api_id||''))
+    return {status:400,reason:'Missing Shopify order id'};
+  // A store must implement runTransaction with unique inbox and line constraints.
+  return store.runTransaction(async tx=>{
+    if(await tx.hasDelivery(deliveryId)) return {status:200,duplicate:true};
+    // Commit the delivery row in the same transaction as the earnings entries.
+    // Store a minimal sanitized payload; avoid duplicating buyer PII in our DB.
+    await tx.recordDelivery({deliveryId,topic,shopDomain,
+      payload:{orderGid:body.admin_graphql_api_id}});
+    const order=await fetchShopifyOrder(body.admin_graphql_api_id,shopDomain);
+    if(!order||order.id!==body.admin_graphql_api_id||
+      !['PAID','PARTIALLY_REFUNDED'].includes(order.displayFinancialStatus))
+      throw new Error('Order must be fetched and paid on Shopify Admin');
+    const results=[];
+    for(const line of order.lineItems) {
+      const attribution=verifyLineAttribution(line.customAttributes,attributionSecret,
+        {orderCreatedAt:order.createdAt});
+      if(!attribution) {
+        // Ordinary Shopify merchandise may share the store; ignore those.
+        // But a tampered fundraiser attribution is an exception, not a silent sale.
+        if(line.customAttributes?.some(a=>String(a.key||a.name).startsWith('_mf_')))
+          throw new Error('Unverifiable Mission Flag attribution');
+        continue;
+      }
+      if(line.id===undefined||line.variantId!==attribution.variantId||
+        line.quantity!==attribution.quantity) throw new Error('Shopify line attribution mismatch');
+      const campaign=await tx.getCampaign(attribution.campaignId);
+      const proof=await tx.getApprovedProof(attribution.proofId,attribution.campaignId);
+      const mapping=await tx.getCampaignVariant(attribution.campaignId,
+        attribution.proofId,attribution.sizeId);
+      const price=await tx.getPriceSnapshot(attribution.campaignId,attribution.sizeId,
+        order.createdAt);
+      if(!campaign||!proof||!mapping?.enabled||
+        mapping.shopifyVariantId!==line.variantId||!price?.verified)
+        throw new Error('Unknown or unapproved campaign/variant/pricing');
+      if(Date.parse(order.createdAt)<Date.parse(campaign.startsAt)||
+        Date.parse(order.createdAt)>=Date.parse(campaign.closesAt))
+        throw new Error('Order outside campaign window');
+      if(line.discountedTotalCents!==price.unitPriceCents*line.quantity)
+        throw new Error('Discount changed booked fundraiser economics');
+      const snapshot=fundraiserLine({...price,quantity:line.quantity});
+      if(await tx.hasOrderLine(line.id)) {
+        results.push({lineId:line.id,duplicate:true});continue;
+      }
+      await tx.insertOrderLine({
+        shopifyOrderId:order.id,shopifyLineId:line.id,
+        campaignId:campaign.id,proofId:proof.id,
+        participantToken:attribution.participantToken,sizeId:attribution.sizeId,
+        paidAt:order.createdAt,priceVersionId:price.priceVersionId||null,...snapshot
+      });
+      await tx.appendEarnings({deliveryId,lineId:line.id,campaignId:campaign.id,
+        dealerId:campaign.dealerId??null,groupCents:snapshot.groupLiabilityCents,
+        dealerCents:snapshot.dealerLiabilityCents});
+      results.push({lineId:line.id,recorded:true});
+    }
+    await tx.markDelivery({deliveryId,topic,shopDomain,processedAt:now});
+    return {status:200,lines:results};
+  });
+}
